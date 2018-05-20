@@ -13,17 +13,20 @@
 \usepackage{paratype}
 
 \setstretch{1.5}
+\emergencystretch 5em
+
 
 \lstset{
-  basicstyle=\linespread{.94}\ttfamily,
-  columns=fixed,
-  breaklines=true,
-  postbreak=\mbox{\textcolor{red}{$\hookrightarrow$}\space},
-  belowskip=1ex,
-  abovecaptionskip=0em,
-  belowcaptionskip=1ex,
-  aboveskip=1em,
-  numbers=left,
+    basicstyle=\linespread{.94}\ttfamily,
+    columns=fixed,
+    breaklines=true,
+    postbreak=\mbox{\textcolor{red}{$\hookrightarrow$}\space},
+    belowskip=1ex,
+    abovecaptionskip=0em,
+    belowcaptionskip=1ex,
+    aboveskip=1em,
+    numbers=left,
+    xleftmargin=1cm,
 }
 
 \renewcommand{\lstlistingname}{Листинг}
@@ -207,7 +210,7 @@ main = print (qsort [8, 4, 0, 3, 1, 23, 11, 18])
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 $ ghci main.hs
 Ok, modules loaded: Main.
 *Main>
@@ -219,7 +222,7 @@ Ok, modules loaded: Main.
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 *Main> :break 2
 Breakpoint 0 activated at main.hs:2:16-47
 \end{lstlisting}
@@ -234,7 +237,7 @@ right}).
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 *Main> :main
 Stopped in Main.qsort, main.hs:2:16-47
 _result :: [Integer] = _
@@ -254,7 +257,7 @@ right :: [Integer] = _
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 [main.hs:2:16-47] *Main> :print left
 left = (_t1::[Integer])
 \end{lstlisting}
@@ -266,7 +269,7 @@ left = (_t1::[Integer])
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 [main.hs:2:16-47] *Main> :force left
 left = [4,0,3,1]
 \end{lstlisting}
@@ -311,7 +314,7 @@ foo = if a == 0 then 0 else b
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 *Main> :list qsort
 1  qsort [] = []
 2  qsort (a:as) = qsort left ++ [a] ++ qsort right
@@ -324,7 +327,7 @@ Breakpoint 0 activated at main.hs:1:12-13
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 *Main> :trace qsort [3, 2, 1]
 Stopped in Main.qsort, main.hs:1:12-13
 _result :: [a] = _
@@ -336,7 +339,7 @@ _result :: [a] = _
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 [main.hs:1:12-13] *Main> :hist
 -1  : qsort:left (main.hs:4:12-26)
 -2  : qsort (main.hs:2:16-25)
@@ -358,7 +361,7 @@ _result :: [a] = _
 
 \begin{ListingEnv}
 \caption{}
-\begin{lstlisting}
+\begin{lstlisting}[numbers=none]
 [main.hs:1:12-13] *Main> :back
 Logged breakpoint at main.hs:4:12-26
 _result :: [Integer]
@@ -417,10 +420,11 @@ STG код транслируется в C-{}-. Это низкоуровнев�
 
 \subsubsection{Немного об STG}
 
-STG это абстрактная машина для свёртки графов. Она была разработана специально
-для компиляции функциональных языков в низкоуровневое машинное представление.
-STG язык -- это язык команд этой машины. Он оперирует понятиями, которые легко
-отобразить на существующие процессоры. Среди них стек, куча, регистры. 
+STG это абстрактная машина для свёртки графов(Simon L Peyton Jones
+\cite{funcOnStockHard}). Она была разработана специально для компиляции
+функциональных языков в низкоуровневое машинное представление.  STG язык -- это
+язык команд этой машины. Он оперирует понятиями, которые легко отобразить на
+существующие процессоры. Среди них стек, куча, регистры. 
 
 STG расшифровывается как Spineless Tagless G-machine.
 
@@ -436,11 +440,15 @@ STG расшифровывается как Spineless Tagless G-machine.
 
 \item Структура объектов, которыми оперирует STG, похожа. Все они имеют первым
 полем указатель на код, который нужно выполнить, чтобы вычислить их значение.
-Поэтому для вычисления значения не нужно знать его точный тип. В структуре
-объектов отсутствует поле, обозначающее тип, то есть tag. Отсюда \textbf{tagless} в
+Поэтому для вычисления значения не нужно знать его точный тип. 
+
+В структуре объектов отсутствует поле, обозначающее тип, то есть tag. Отсюда
+\textbf{tagless} в
 названии.
 
-\item \textbf{G-machine} означает, что это машина для свёртки графов.
+\item \textbf{G-machine} это сокращение от Graph reduction machine, то есть
+машина графовых свёрток. Здесь граф это выражение на функциональном языке, а
+свёртка это процесс его вычисления.
 
 \end{itemize}
 
@@ -494,7 +502,83 @@ interpretBCO (Capability* cap)
 \end{lstlisting}
 \end{ListingEnv}
 
-[1] Implementing lazy functional languages on stock hardware:
-the Spineless Tagless G-machine, 1992, Simon L Peyton Jones
+\section{Баг}
+
+В рамках исследования реализации отладчика мы обратили внимание на баг(\#{}8316,
+\cite{bug}). Он заключается в том, что отладчик аварийно завершается при попытке
+вычислить определённую переменную после остановки.
+
+\subsection{Воспроизведение}
+
+Для демонстрации ошибки рассмотрим файл Test.hs:
+
+\begin{ListingEnv}
+\caption{Test.hs}
+\begin{lstlisting}
+foo :: [Int]
+foo = [1..]
+\end{lstlisting}
+\end{ListingEnv}
+
+Загрузим его в интерпретатор
+
+\begin{ListingEnv}
+\caption{}
+\begin{lstlisting}[numbers=none]
+ghci Test.hs
+\end{lstlisting}
+\end{ListingEnv}
+
+Поставим точку останова на \code{foo}, запустим его вычисление и
+напечатаем с помощью команды \code{:print}.
+
+\begin{ListingEnv}
+\caption{}
+\begin{lstlisting}[numbers=none]
+*Main> :break foo
+Breakpoint 0 activated at main.hs:2:7-11
+*Main> foo
+Stopped in Main.foo, main.hs:2:7-11
+_result :: [Int] = _
+[main.hs:2:7-11] *Main> :print foo
+foo = (_t1::[Int])
+\end{lstlisting}
+\end{ListingEnv}
+
+Теперь попробуем вычислить значение \code{\_t1}.
+
+\begin{ListingEnv}
+\caption{}
+\begin{lstlisting}[numbers=none]
+[main.hs:2:7-11] *Main> _t1
+\end{lstlisting}
+\end{ListingEnv}
+
+Здесь возникает ошибка и интерпретатор аварийно завершается.
+
+\begin{ListingEnv}
+\caption{Ошибка}
+\begin{lstlisting}[numbers=none]
+<interactive>: internal error: TSO object entered!
+    (GHC version 8.5.20180302 for x86_64_unknown_linux)
+    Please report this as a GHC bug:  http://www.haskell.org/ghc/reportabug
+[1]    5445 abort (core dumped)  ghci Test.hs
+\end{lstlisting}
+\end{ListingEnv}
+
+\addcontentsline{toc}{subsection}{Библиография}
+\begin{thebibliography}{9}
+
+\bibitem{funcOnStockHard}
+Simon L Peyton Jones,
+\emph{Implementing lazy functional languages on stock hardware: the Spineless
+Tagless G-machine}, 1992
+
+\bibitem{bug}
+GHCi debugger segfaults when trying force a certain variable
+\emph{https://ghc.haskell.org/trac/ghc/ticket/8316}
+
+\end{thebibliography}
+
 
 \end{document}
