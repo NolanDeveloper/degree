@@ -15,7 +15,6 @@
 \setstretch{1.5}
 \emergencystretch 5em
 
-
 \lstset{
     basicstyle=\linespread{.94}\ttfamily,
     columns=fixed,
@@ -566,6 +565,231 @@ foo = (_t1::[Int])
 \end{lstlisting}
 \end{ListingEnv}
 
+\section{Архитектура отладчика GHCi}
+
+Основные локации:
+
+\begin{itemize}
+
+\item \textbf{\texttt{ghc/GHCi}}
+
+В папке ghc/GHCi находится код реализующий взаимодействие с пользователем:
+распознавание и выполнение функций соответствующих команд.
+
+\item \textbf{\texttt{libraries/ghci}}
+
+Содержит:
+
+\begin{itemize}
+\item Типы для межпроцессной обработки значений
+\item Протокол взаимодействия
+\item Реализацию сообщений
+\item Реализацию расширения Template Haskell для отладчика
+\end{itemize}
+
+\item \textbf{\texttt{iserv}}
+
+Процесс-сервер отладчика. Код довольно простой. Большая часть реализации
+содержится в libraries/ghci
+
+\item \textbf{\texttt{compiler/ghci}}
+
+Модуль compiler/ghci/GHCi предоставляет интерфейс сервера, который используется
+остальным кодом.
+
+\item \textbf{\texttt{rts/Interpreter.c}}
+
+Содержит код системы времени выполнения, отвечающий за исполнение байткода. 
+Функция \texttt{interpretBCO}.
+
+\item \textbf{\texttt{include/rts/Bytecodes.h}}
+
+Содежит номера байткод инструкций.
+
+\begin{ListingEnv}
+\caption{include/rts/Bytecodes.h}
+\begin{lstlisting}[firstnumber=26]
+#define bci_STKCHECK            1
+#define bci_PUSH_L              2
+#define bci_PUSH_LL             3
+#define bci_PUSH_LLL            4
+#define bci_PUSH8                       5
+#define bci_PUSH16                      6
+...
+\end{lstlisting}
+\end{ListingEnv}
+
+\end{itemize}
+
+\subsection{Выполнение}
+
+Рассмотрим что происходит, когда мы запускаем интерпретатор. Во первых отметим,
+что ghci не является отдельной от компилятора утилитой. Это скрипт, который
+запускает компилятор, то есть ghc, с параметром -{}-interactive.
+
+\begin{ListingEnv}
+\caption{}
+\begin{lstlisting}[numbers=none]
+user@desktop:~$ which ghci
+/usr/bin/ghci
+user@desktop:~$ cat /usr/bin/ghci
+#!/bin/sh
+exec "/usr/bin/ghc-8.0.1" --interactive "$@"
+\end{lstlisting}
+\end{ListingEnv}
+
+Теперь обратимся к коду. Функция \code{main}, с которой начинается выполнение
+ghc, находится в файле ghc/Main.hs. Там происходит анализ параметров командной
+строки. Если среди параметров есть \code{-{}-interactive}, то вызывается
+функция \code{interactiveUI}. 
+
+Главной монадой в ghc является монада Ghc. Она позволяет осуществлять
+ввод-вывод и обеспечивает доступ к состоянию компилятора: флаги настроек, граф
+модулей и другие. 
+
+\begin{ListingEnv}
+\caption{compiler/main/GhcMonad.hs}
+\begin{lstlisting}[numbers=none]
+newtype Ghc a = Ghc { unGhc :: Session -> IO a }
+\end{lstlisting}
+\end{ListingEnv}
+
+Модули компилятора, которые требуют больше возможностей расширяют эту монаду.
+Интерпретатор пользуется монадой GHCi. Она помимо возможностей монады Ghc
+обеспечивает доступ к состоянию интерпретатора: загруженные модули, подсказка
+ввода, количество введённых строк и другие.
+
+\begin{ListingEnv}
+\caption{ghc/UI/Monad.hs}
+\begin{lstlisting}[numbers=none]
+newtype GHCi a 
+    = GHCi { unGHCi :: IORef GHCiState -> Ghc a }
+\end{lstlisting}
+\end{ListingEnv}
+
+\code{interactiveUI} настраевает стандартные буферы для интерактивной работы и
+запускает \code{runGHCi}. Её результат передаётся аргументом для
+\code{startGHCi}, потому что значение результата имеет тип \code{GHCi ()}, а
+\code{interactiveUI} возвращает тип \code{Ghc ()}.
+
+\begin{ListingEnv}
+\caption{ghc/GHCi/UI.hs}
+\begin{lstlisting}[firstnumber=400]
+interactiveUI :: GhciSettings -> [(FilePath, Maybe Phase)] -> Maybe [String]
+              -> Ghc ()
+interactiveUI config srcs maybe_exprs = do
+\end{lstlisting}
+...
+\begin{lstlisting}[firstnumber=454]
+    startGHCi (runGHCi srcs maybe_exprs)
+        GHCiState{ progname = default_progname,
+                   args     = default_args, ... }
+\end{lstlisting}
+\end{ListingEnv}
+
+Для взаимодействия с пользователем ghc использует библиотеку haskeline. Она
+похожа на библиотеку realine для си. Ввод строк происходит в монаде InputT.
+\code{runGHCi} запускает read-eval-print loop, который работает в этой монаде.
+
+\begin{ListingEnv}
+\caption{ghc/GHCi/UI.hs}
+\begin{lstlisting}[firstnumber=892]
+-- | The main read-eval-print loop
+runCommands :: InputT GHCi (Maybe String) -> InputT GHCi ()
+runCommands gCmd = runCommands' handler Nothing gCmd >> return ()
+\end{lstlisting}
+\end{ListingEnv}
+
+\code{runCommands'} вызывает \code{runOneCommand}, которая вызвыает
+\code{doCommand}. Если ввод начинается с двоеточия \code{doCommand} распознаёт
+команду и запускает её обработчик. В противном случае считается, что
+пользователь ввёл выражение.
+
+\subsubsection{Случай команды}
+
+Если введённая строка начинается с восклицательного знака, то в этом случае её
+остальная часть рассматривается как команда шел скрипта.
+
+\begin{ListingEnv}
+\caption{ghc/GHCi/UI.hs}
+\begin{lstlisting}[firstnumber=1204]
+specialCommand :: String -> InputT GHCi Bool
+specialCommand ('!':str) = lift $ shellEscape (dropWhile isSpace str)
+\end{lstlisting}
+...
+\begin{lstlisting}[firstnumber=1221]
+shellEscape :: String -> GHCi Bool
+shellEscape str = liftIO (system str >> return False)
+\end{lstlisting}
+\end{ListingEnv}
+
+Если строка не начинается с восклицательного знака, то из неё выделяется первое слово.
+По нему происходит поиск в списке команд. 
+
+\begin{ListingEnv}
+\caption{ghc/GHCi/UI.hs}
+\begin{lstlisting}[firstnumber=1206]
+specialCommand str = do
+  let (cmd,rest) = break isSpace str
+  maybe_cmd <- lift $ lookupCommand cmd
+
+  case maybe_cmd of
+    GotCommand cmd -> (cmdAction cmd) (dropWhile isSpace rest)
+\end{lstlisting}
+\end{ListingEnv}
+
+\begin{ListingEnv}
+\caption{}
+\begin{lstlisting}
+lookupCommand :: String -> GHCi (MaybeCommand)
+lookupCommand "" = do
+  st <- getGHCiState
+  case last_command st of
+      Just c -> return $ GotCommand c
+      Nothing -> return NoLastCommand
+lookupCommand str = do
+  mc <- lookupCommand' str
+  modifyGHCiState (\st -> st { last_command = mc })
+  return $ case mc of
+           Just c -> GotCommand c
+           Nothing -> BadCommand
+\end{lstlisting}
+\end{ListingEnv}
+
+\begin{ListingEnv}
+\caption{}
+\begin{lstlisting}
+lookupCommand' :: String -> GHCi (Maybe Command)
+lookupCommand' ":" = return Nothing
+lookupCommand' str' = do
+  macros    <- ghci_macros <$> getGHCiState
+  ghci_cmds <- ghci_commands <$> getGHCiState
+
+  let ghci_cmds_nohide = filter (not . cmdHidden) ghci_cmds
+
+  let (str, xcmds) = case str' of
+          ':' : rest -> (rest, [])     -- "::" selects a builtin command
+          _          -> (str', macros) -- otherwise include macros in lookup
+
+      lookupExact  s = find $ (s ==)           . cmdName
+      lookupPrefix s = find $ (s `isPrefixOf`) . cmdName
+
+      -- hidden commands can only be matched exact
+      builtinPfxMatch = lookupPrefix str ghci_cmds_nohide
+
+  -- first, look for exact match (while preferring macros); then, look
+  -- for first prefix match (preferring builtins), *unless* a macro
+  -- overrides the builtin; see #8305 for motivation
+  return $ lookupExact str xcmds <|>
+           lookupExact str ghci_cmds <|>
+           (builtinPfxMatch >>= \c -> lookupExact (cmdName c) xcmds) <|>
+           builtinPfxMatch <|>
+           lookupPrefix str xcmds
+\end{lstlisting}
+\end{ListingEnv}
+
+\subsubsection{Случай кода}
+
 \addcontentsline{toc}{subsection}{Библиография}
 \begin{thebibliography}{9}
 
@@ -579,6 +803,5 @@ GHCi debugger segfaults when trying force a certain variable
 \emph{https://ghc.haskell.org/trac/ghc/ticket/8316}
 
 \end{thebibliography}
-
 
 \end{document}
