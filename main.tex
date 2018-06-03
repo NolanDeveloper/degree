@@ -25,7 +25,7 @@
     belowcaptionskip=1ex,
     aboveskip=1em,
     numbers=left,
-    xleftmargin=1cm,
+    xleftmargin=1.5cm,
 }
 
 \renewcommand{\lstlistingname}{Листинг}
@@ -124,7 +124,7 @@
 В данной работе мы исследуем детали реализации отладчика языка Хаскель,
 встроенного в интерпретатор GHCi. 
 
-\section{Ленивость}
+\subsection{Ленивость}
 
 Особый интерес заключается в том, что Хаскель является языком программирования
 с ленивой стратегией вычисления. Это означает, что порядок вычисления не задан
@@ -490,7 +490,7 @@ byteCodeGen :: HscEnv
 \code{BCO} -- это один из объектов, которыми оперирует STG. Они представляют из
 себя массив инструкций байткода. Интерпретацией этих объектов занимется среда
 времени выполнения. Интерпретатор во время своей работы взяимодействует со
-средой выполнения, для исполнения своих команд.
+средой времени выполнения, для исполнения своих команд.
 
 \begin{ListingEnv}
 \caption{rts/Interpreter.c}
@@ -594,7 +594,7 @@ foo = (_t1::[Int])
 
 \item \textbf{\texttt{compiler/ghci}}
 
-Модуль compiler/ghci/GHCi предоставляет интерфейс сервера, который используется
+Модуль compiler/ghci предоставляет интерфейс сервера, который используется
 остальным кодом.
 
 \item \textbf{\texttt{rts/Interpreter.c}}
@@ -705,7 +705,7 @@ runCommands gCmd = runCommands' handler Nothing gCmd >> return ()
 команду и запускает её обработчик. В противном случае считается, что
 пользователь ввёл выражение.
 
-\subsubsection{Случай команды}
+\paragraph{Команда}
 
 Если введённая строка начинается с восклицательного знака, то в этом случае её
 остальная часть рассматривается как команда шел скрипта.
@@ -723,8 +723,8 @@ shellEscape str = liftIO (system str >> return False)
 \end{lstlisting}
 \end{ListingEnv}
 
-Если строка не начинается с восклицательного знака, то из неё выделяется первое слово.
-По нему происходит поиск в списке команд. 
+Если строка не начинается с восклицательного знака, то из неё выделяется первое
+слово. По нему происходит поиск в списке команд и макросов. 
 
 \begin{ListingEnv}
 \caption{ghc/GHCi/UI.hs}
@@ -738,57 +738,95 @@ specialCommand str = do
 \end{lstlisting}
 \end{ListingEnv}
 
+Активные макросы и команды доступны в монаде \code{GHCi}. Список макросов
+изначально пуст. Пользователь может определить свои макросы с помощью команды
+\code{:def}. Список команд доступных в интерпретаторе по умолчанию находится в
+переменной \code{ghciCommands}, которая определена в этом же файле. В этом
+списке помимо названий команд находятся соответсвующие им функции.
+
+\paragraph{Код}
+
+Если пользователь ввёл код, работает функция \code{runStmt}.
+
 \begin{ListingEnv}
-\caption{}
-\begin{lstlisting}
-lookupCommand :: String -> GHCi (MaybeCommand)
-lookupCommand "" = do
-  st <- getGHCiState
-  case last_command st of
-      Just c -> return $ GotCommand c
-      Nothing -> return NoLastCommand
-lookupCommand str = do
-  mc <- lookupCommand' str
-  modifyGHCiState (\st -> st { last_command = mc })
-  return $ case mc of
-           Just c -> GotCommand c
-           Nothing -> BadCommand
+\caption{ghc/GHCi/UI.hs}
+\begin{lstlisting}[firstnumber=1080]
+runStmt :: String -> SingleStep -> GHCi (Maybe GHC.ExecResult)
+runStmt stmt step = do
+  dflags <- GHC.getInteractiveDynFlags
+  if | GHC.isStmt dflags stmt    -> run_stmt
+     | GHC.isImport dflags stmt  -> run_import
+     | otherwise                 -> run_decl
 \end{lstlisting}
 \end{ListingEnv}
 
+Код бывает трёх видов: это может быть просьба загрузить модуль(\code{import}),
+объявление переменной или функции(\code{declaration}),
+выражение(\code{statement}).
+
+Рассмотрим подробно случаи объявления и выражения.
+
+\paragraph{Объявление}
+
+В случае объявления работа продолжается в монаде \code{GHC}. Вызывается функция
+\code{runDeclsWithLocation}.
+
 \begin{ListingEnv}
-\caption{}
-\begin{lstlisting}
-lookupCommand' :: String -> GHCi (Maybe Command)
-lookupCommand' ":" = return Nothing
-lookupCommand' str' = do
-  macros    <- ghci_macros <$> getGHCiState
-  ghci_cmds <- ghci_commands <$> getGHCiState
-
-  let ghci_cmds_nohide = filter (not . cmdHidden) ghci_cmds
-
-  let (str, xcmds) = case str' of
-          ':' : rest -> (rest, [])     -- "::" selects a builtin command
-          _          -> (str', macros) -- otherwise include macros in lookup
-
-      lookupExact  s = find $ (s ==)           . cmdName
-      lookupPrefix s = find $ (s `isPrefixOf`) . cmdName
-
-      -- hidden commands can only be matched exact
-      builtinPfxMatch = lookupPrefix str ghci_cmds_nohide
-
-  -- first, look for exact match (while preferring macros); then, look
-  -- for first prefix match (preferring builtins), *unless* a macro
-  -- overrides the builtin; see #8305 for motivation
-  return $ lookupExact str xcmds <|>
-           lookupExact str ghci_cmds <|>
-           (builtinPfxMatch >>= \c -> lookupExact (cmdName c) xcmds) <|>
-           builtinPfxMatch <|>
-           lookupPrefix str xcmds
+\caption{compiler/main/InteractiveEval.hs}
+\begin{lstlisting}[firstnumber=199]
+runDeclsWithLocation :: GhcMonad m => String -> Int -> String -> m [Name]
+runDeclsWithLocation source linenumber expr =
+...
+    (tyThings, ic) <- liftIO $ hscDeclsWithLocation hsc_env expr source linenumber
+...
 \end{lstlisting}
 \end{ListingEnv}
 
-\subsubsection{Случай кода}
+\code{hscDeclsWithLocation} выполняет все стадии компиляции: лексический и
+синтаксический анализ, разрешение имён, проверка типов, удаление
+синтаксического сахара, оптимизация и кодогенерация, а также линковка.  Она
+возвращает новый интактивный контекст и новые доступные идентификаторы:
+функции, переменные, геттеры структур, методы классов.
+
+\paragraph{Выражение}
+
+В случае выражения работает функция \code{execStmt}. Она сначала компилирует, а
+затем выполняет введёный пользователем код.
+
+\begin{ListingEnv}
+\caption{compiler/main/InteractiveEval.hs}
+\begin{lstlisting}
+-- | Run a statement in the current 
+     interactive context.
+execStmt
+  :: GhcMonad m
+  => String -- ^ a statement (bind or expression)
+  -> ExecOptions
+  -> m ExecResult
+execStmt stmt ExecOptions{..} = do
+...
+    -- compile to value (IO [HValue]), don't run
+    r <- liftIO $ 
+        hscStmtWithLocation hsc_env' stmt 
+                            execSourceFile 
+                            execLineNumber
+...
+    evalStmt hsc_env' (isStep execSingleStep) (execWrap hval)
+\end{lstlisting}
+\end{ListingEnv}
+
+\subsection{Точки останова}
+
+Рассмотрим, как реализованы точки останова.
+
+Во время удаления синтаксического сахара в АСД внедряются специальные узлы
+\code{HsTick}. Это необходимо для установки соответствия между кодом на
+последующих этапах и исходным кодом программы. Они используются для проверки
+покрытия кода тестами и в отладчике для реализации точек остановки. Все
+выражения, подвыражения и сами объявления оборачиваются в этот конструктор.
+
+При компиляции \code{HsTick} добавляется специальная инструкция байткода
+\code{BRK\_FUN}.
 
 \addcontentsline{toc}{subsection}{Библиография}
 \begin{thebibliography}{9}
