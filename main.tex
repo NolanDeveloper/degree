@@ -675,8 +675,11 @@ newtype GHCi a
 \begin{ListingEnv}
 \caption{ghc/GHCi/UI.hs}
 \begin{lstlisting}[firstnumber=400]
-interactiveUI :: GhciSettings -> [(FilePath, Maybe Phase)] -> Maybe [String]
-              -> Ghc ()
+interactiveUI 
+  :: GhciSettings 
+  -> [(FilePath, Maybe Phase)] 
+  -> Maybe [String]
+  -> Ghc ()
 interactiveUI config srcs maybe_exprs = do
 \end{lstlisting}
 ...
@@ -815,9 +818,39 @@ execStmt stmt ExecOptions{..} = do
 \end{lstlisting}
 \end{ListingEnv}
 
-\subsection{Точки останова}
+В конце концов управление переходит в функцию \code{sandboxIO}.
 
-Рассмотрим, как реализованы точки останова.
+\begin{ListingEnv}
+\caption{libraries/ghci/GHCi/Run.hs}
+\begin{lstlisting}[numbers=none]
+sandboxIO :: EvalOpts -> IO a -> IO (EvalStatus a)
+sandboxIO opts io = do
+  -- We are running in uninterruptibleMask
+  breakMVar <- newEmptyMVar
+  statusMVar <- newEmptyMVar
+  withBreakAction opts breakMVar statusMVar $ do
+    measureAlloc $ tryEval $ rethrow opts 
+                 $ clearCCS io
+\end{lstlisting}
+\end{ListingEnv}
+
+\code{MVar} это изменяемая переменная, одной из функций которой служит
+синхронизация потоков. Она может находиться в двух состояниях: пустая или
+хранит значение. При помещении в неё значения, если она не пустая, поток будет
+заблокирован, пока какой-нибудь другой поток не опустошит её. При изъятии
+блокировка происходит в случае, когда переменная не содержит значения.
+
+\code{sandboxIO} создаёт новый поток, запускает в нём введённый код и начинает
+ждать, когда в переменной \code{statusMVar} появится статус выполнения. Статус
+это либо завершение, либо остановка на точке останова. 
+
+В момент момент, когда затрагивается точка останова, поток, выполняющий код
+пользователя, заполняет изменяемую переменную \code{statusMVar} значением
+\code{EvalBreak} и пытается достать значение из переменной \code{breakMVar}.
+Первое позволяет разблокировать поток \code{ghci}, второе даёт возможность
+потоку \code{ghci} продолжить выполнения с места остановки.
+
+\subsection{RTS}
 
 Во время удаления синтаксического сахара в АСД внедряются специальные узлы
 \code{HsTick}. Это необходимо для установки соответствия между кодом на
@@ -826,7 +859,15 @@ execStmt stmt ExecOptions{..} = do
 выражения, подвыражения и сами объявления оборачиваются в этот конструктор.
 
 При компиляции \code{HsTick} добавляется специальная инструкция байткода
-\code{BRK\_FUN}.
+\code{BRK\_FUN}. Код интерпретации данной инструкции находится в файле
+\code{rts/Interpreter.c} в функции \code{interpretBCO}. Когда выполнение
+доходит до этой инструкции происходит следующее. Интерпретатор проверяет
+активна ли точка останова соответствующая этой инструкции. Информация об этом
+хранится в специальном массиве бит внутри \code{BCO}. У инструкции
+\code{BRK\_FUN} есть параметр -- индекс в этом массиве. Установка
+соответствующего бита активирует точку останова.  Если точка неактивна, то
+выполнение продолжается.  В противном случае выполняется код, который
+использует изменяемые переменные из \code{sandboxIO}.
 
 \addcontentsline{toc}{subsection}{Библиография}
 \begin{thebibliography}{9}
