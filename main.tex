@@ -867,7 +867,7 @@ foo = (_t1::[Int])
 \end{lstlisting}
 \end{ListingEnv}
 
-\subsection{Место падения}
+\subsubsection{Место падения}
 
 Изучение причин возникновения данной ошибки привело нас к функции
 \code{cvObtainTerm} из файла \code{compiler/ghci/RtClosureInspect.hs}. Во
@@ -926,14 +926,66 @@ cvObtainTerm
 вычислить значение происходит переход по адресу \code{TSO}, но там отсутствуют
 инструкции процессора, что приводит к аварийному завершению программы.
 
+\subsection{Неправильный вывод подсказки ввода}
+
+Мы рассмотрели ещё одну проблему в работе отладчика\cite{fixedissue}.
+
+ghci выводит специальную строку, когда ожидает ввода от пользователя.
+Изначально она состоит из списка загруженных модулей и символа больше.
+Пользователь может изменить содержание этой строки командой \code{:set prompt
+<новая подсказка>}.
+
+\begin{ListingEnv}
+\caption{Подсказка ввода по умолчанию}
+\begin{lstlisting}[numbers=none]
+Prelude>
+\end{lstlisting}
+\end{ListingEnv}
+
+\begin{ListingEnv}
+\caption{Команда :set prompt}
+\begin{lstlisting}[numbers=none]
+Prelude> :set prompt INPUT#
+INPUT#
+\end{lstlisting}
+\end{ListingEnv}
+
+После остановки на точке останова подсказка ввода меняется. Она дополняется названием
+файла и номером строки, где остановилось выполнение.
+
+\begin{ListingEnv}
+\caption{Подсказка ввода во время остановки}
+\begin{lstlisting}[numbers=none]
+Stopped in Main.list, main.hs:1:8-12
+_result :: [Integer] = _
+[main.hs:1:8-12] *Main> 
+\end{lstlisting}
+\end{ListingEnv}
+
+При модификации исходного кода ghci была допущена ошибка, которая привела к тому,
+что место остановки печаталось дважды.
+
+\begin{figure}[H]
+\centering
+\caption{Исправление}
+\label{fig:compilation}
+\includegraphics[scale=0.3]{patch.png}
+\end{figure}
+
+Функция \code{generatePromptFunctionFromString} была написана неправильно. Как
+видно она включала контекст в список модулей, поэтому контекст печатался
+дважды. Мы исправили это и отправили исправления основным разработчикам,
+используя сервис Phabricator\cite{patch}. Их проверили визуально и помощью
+запуска тестов, после чего изменения были включены в git репозиторий ghc.
+
 \section{Заключение}
 
 Мы рассмотрели внутреннее устройство отладчика GHCi. Были продемонстрированы
-его возможности как отладчика функционального языка программирования. В ходе
-изучения ошибки в его работе были исследованы принципы взаимодействия отладчика
-и отлаживаемой программы. Был подробно изучен процесс компиляции и его
-особенности в контексте отладки. Также мы подробно описали реализацию механизма
-точек останова.
+его возможности как отладчика функционального языка программирования. Были
+рассмотрены две ошибки, одна была исправлена. В ходе изучения ошибок в его
+работе были исследованы принципы взаимодействия отладчика и отлаживаемой
+программы. Был подробно изучен процесс компиляции и его особенности в контексте
+отладки. Также мы подробно описали реализацию механизма точек останова. 
 
 \addcontentsline{toc}{section}{Библиография}
 \begin{thebibliography}{9}
@@ -952,6 +1004,7 @@ Tagless G-machine}, 1992
 \emph{Учебник по Haskell}, 2012
 
 \bibitem{bug}
+GHC Trac issue \#8316,
 GHCi debugger segfaults when trying force a certain variable
 \emph{https://ghc.haskell.org/trac/ghc/ticket/8316}
 
@@ -972,6 +1025,15 @@ Richard Jones,
 \bibitem{commentary}
 GHC Commentary: The Layout of Heap Objects,
 \emph{https://ghc.haskell.org/trac/ghc/wiki/Commentary/Rts/Storage/HeapObjects}
+
+\bibitem{fixedissue}
+GHC Trac issue \#14973,
+Location in GHCi debugger prompt printed twice when default prompt is used,
+\emph{https://ghc.haskell.org/trac/ghc/ticket/14973}
+
+\bibitem{patch}
+Differential D4661,
+\emph{https://phabricator.haskell.org/D4661}
 
 \end{thebibliography}
 
